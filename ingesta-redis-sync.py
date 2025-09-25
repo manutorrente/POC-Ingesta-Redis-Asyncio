@@ -137,3 +137,6 @@ def main():
     logger.info("Closing connections.")
     impala_conn.close()
     redis_cli.close()
+    
+if __name__ == "__main__":
+    main()

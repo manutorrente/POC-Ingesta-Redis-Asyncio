@@ -5,5 +5,8 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "impyla>=0.22.0",
     "msgspec>=0.19.0",
+    "python-dotenv>=1.1.1",
+    "redis>=6.4.0",
 ]
