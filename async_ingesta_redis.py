@@ -70,7 +70,7 @@ def build_json(data: list, data_columns: list[str], remove_nulls: bool = True) -
 key_column = 1
 
 class TableIterator:
-    def __init__(self, impala_conf: dict, table_name: str, chunk_size: int = 5000) -> None:
+    def __init__(self, impala_conf: dict, table_name: str, chunk_size: int = 10000) -> None:
         self.conn = init_impala_connection(impala_conf)
         self.cursor = self.conn.cursor()
         self.query = f"SELECT * FROM {table_name}"
