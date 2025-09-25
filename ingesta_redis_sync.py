@@ -70,9 +70,11 @@ key_column = 1
 
 class TableIterator:
     def __init__(self, impala_conn, table_name: str, chunk_size: int = 1000) -> None:
+        self.conn = impala_conn
         self.cursor = impala_conn.cursor()
-        logger.info(f"Executing query to fetch data from table {table_name}")
-        self.cursor.execute(f"SELECT * FROM {table_name}")
+        query = f"SELECT * FROM {table_name}"
+        logger.info(f"Executing query {query}")
+        self.cursor.execute(query)
         self.chunk_size = chunk_size
         self.table_name = table_name
 
@@ -89,11 +91,12 @@ class TableIterator:
         return rows
 
     def get_column_names(self) -> list[str]:
-        self.cursor.execute(f"DESCRIBE {self.table_name}")
-        columns = [row[0] for row in self.cursor.fetchall()]
+        cursor = self.conn.cursor()
+        cursor.execute(f"DESCRIBE {self.table_name}")
+        columns = [row[0] for row in cursor.fetchall()]
         logger.info(f"Fetched column names for table {self.table_name}")
+        cursor.close()
         return columns
-        
                 
 def insert_table(table_name: str, redis_cli: Redis, impala_conn) -> None:
     
