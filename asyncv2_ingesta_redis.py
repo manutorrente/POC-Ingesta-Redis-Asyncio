@@ -30,17 +30,28 @@ redis_conf = {
     "password" : os.getenv("REDIS_PASSWORD"),
 }
 
-def init_impala_connection():
-    try:
-        impala_conn = connect(host=impala_conf["host"],
-                    port=impala_conf["port"],
-                    user=impala_conf["user"],
-                    password=impala_conf["password"],
-                timeout=impala_conf["timeout"]
-                )
-        return impala_conn
-    except Exception as e:
-        raise e
+def init_impala_connection(max_retries: int = 3, retry_delay: float = 2.0):
+    """Initialize Impala connection with retry logic."""
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"Attempting to connect to Impala (attempt {attempt + 1}/{max_retries})")
+            impala_conn = connect(host=impala_conf["host"],
+                        port=impala_conf["port"],
+                        user=impala_conf["user"],
+                        password=impala_conf["password"],
+                    timeout=impala_conf["timeout"]
+                    )
+            logger.info("Successfully connected to Impala")
+            return impala_conn
+        except Exception as e:
+            logger.warning(f"Failed to connect to Impala (attempt {attempt + 1}/{max_retries}): {str(e)}")
+            if attempt < max_retries - 1:
+                logger.info(f"Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                retry_delay *= 1.5  # Exponential backoff
+            else:
+                logger.error("All Impala connection attempts failed")
+                raise
 
 def init_redis_connection():
     try:
@@ -72,60 +83,124 @@ key_column = 1
 class TableIterator:
     def __init__(self, impala_conn, table_name: str, chunk_size: int = 10000) -> None:
         self.conn = impala_conn
-        self.cursor = impala_conn.cursor()
-        query = f"SELECT * FROM {table_name}"
-        logger.info(f"Executing query {query}")
-        self.cursor.execute(query)
-        self.chunk_size = chunk_size
+        self.cursor = None
         self.table_name = table_name
+        self.chunk_size = chunk_size
+        self._initialize_cursor()
+
+    def _initialize_cursor(self):
+        """Initialize cursor and execute query with error handling."""
+        try:
+            self.cursor = self.conn.cursor()
+            query = f"SELECT * FROM {self.table_name}"
+            logger.info(f"Executing query {query}")
+            self.cursor.execute(query)
+        except Exception as e:
+            logger.error(f"Failed to initialize cursor for table {self.table_name}: {str(e)}")
+            if self.cursor:
+                try:
+                    self.cursor.close()
+                except:
+                    pass
+            raise
 
     def __iter__(self):
         return self
 
     def __next__(self):
-        logger.info(f"Fetching next chunk of data from table {self.table_name}")
-        rows = self.cursor.fetchmany(self.chunk_size)
-        logger.info(f"Fetched {len(rows)} rows from table {self.table_name}")
-        if not rows:
-            self.cursor.close()
-            raise StopIteration
-        return rows
+        try:
+            if not self.cursor:
+                raise RuntimeError(f"Cursor not initialized for table {self.table_name}")
+            
+            logger.info(f"Fetching next chunk of data from table {self.table_name}")
+            rows = self.cursor.fetchmany(self.chunk_size)
+            logger.info(f"Fetched {len(rows)} rows from table {self.table_name}")
+            if not rows:
+                self._close_cursor()
+                raise StopIteration
+            return rows
+        except Exception as e:
+            logger.error(f"Error fetching data from table {self.table_name}: {str(e)}")
+            self._close_cursor()
+            raise
+
+    def _close_cursor(self):
+        """Safely close the cursor."""
+        if self.cursor:
+            try:
+                self.cursor.close()
+                logger.info(f"Closed cursor for table {self.table_name}")
+            except Exception as e:
+                logger.warning(f"Error closing cursor for table {self.table_name}: {str(e)}")
 
     def get_column_names(self) -> list[str]:
-        cursor = self.conn.cursor()
-        cursor.execute(f"DESCRIBE {self.table_name}")
-        columns = [row[0] for row in cursor.fetchall()]
-        logger.info(f"Fetched column names for table {self.table_name}")
-        cursor.close()
-        return columns
+        cursor = None
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute(f"DESCRIBE {self.table_name}")
+            columns = [row[0] for row in cursor.fetchall()]
+            logger.info(f"Fetched column names for table {self.table_name}")
+            return columns
+        except Exception as e:
+            logger.error(f"Error fetching column names for table {self.table_name}: {str(e)}")
+            raise
+        finally:
+            if cursor:
+                try:
+                    cursor.close()
+                except Exception as e:
+                    logger.warning(f"Error closing describe cursor for table {self.table_name}: {str(e)}")
                 
-def insert_table(table_name: str, redis_cli: Redis, impala_conn) -> None:
-    
-    iterator = TableIterator(impala_conn, table_name)
-
-    column_names: list[str] = iterator.get_column_names()
-    column_names.pop(key_column)
-    
-    for chunk in iterator:
+def insert_table(table_name: str) -> None:
+    # Create separate connections for this task to avoid thread conflicts
+    impala_conn = None
+    redis_cli = None
+    try:
+        impala_conn = init_impala_connection()
+        redis_cli = init_redis_connection()
+        logger.info(f"Created connections for table {table_name}")
         
-        pipeline = redis_cli.pipeline()
-        
-        for row in chunk:
-            key = f"tmp:{table_name}:{row[key_column]}"
-            row_list = list(row)
-            row_list.pop(key_column)
-            json_data = build_json(row_list, column_names)
-            pipeline.set(key, json_data, ex=86400)
+        iterator = TableIterator(impala_conn, table_name)
 
-        logger.info(f"Inserted chunk into Redis for table {table_name}")
-        pipeline.execute()
+        column_names: list[str] = iterator.get_column_names()
+        column_names.pop(key_column)
+        
+        for chunk in iterator:
+            
+            pipeline = redis_cli.pipeline()
+            
+            for row in chunk:
+                key = f"tmp:{table_name}:{row[key_column]}"
+                row_list = list(row)
+                row_list.pop(key_column)
+                json_data = build_json(row_list, column_names)
+                pipeline.set(key, json_data, ex=86400)
+
+            logger.info(f"Inserted chunk into Redis for table {table_name}")
+            pipeline.execute()
+            
+    except Exception as e:
+        logger.error(f"Error processing table {table_name}: {str(e)}")
+        raise
+    finally:
+        # Clean up connections
+        if impala_conn:
+            try:
+                impala_conn.close()
+                logger.info(f"Closed Impala connection for table {table_name}")
+            except Exception as e:
+                logger.warning(f"Error closing Impala connection for table {table_name}: {str(e)}")
+        
+        if redis_cli:
+            try:
+                redis_cli.close()
+                logger.info(f"Closed Redis connection for table {table_name}")
+            except Exception as e:
+                logger.warning(f"Error closing Redis connection for table {table_name}: {str(e)}")
 
 
 async def main():
     logger.info("Hello from redis-poc-async!")
-    
-    impala_conn = init_impala_connection()
-    redis_cli = init_redis_connection()
 
     start_time = time.time()
     
@@ -137,17 +212,14 @@ async def main():
     
     tables = ["pr_bsf_3ref.riesgos_calificacion_prestamos_tarjetas_snap", "pr_bsf_3ref.pre_bureau_antecedentes_negativos_om", "pr_bsf_3ref.dim_veraz"]
         
-    coros = [asyncio.to_thread(insert_table, table, redis_cli, impala_conn) for table in tables]
+    # Each task will create its own connections to avoid thread conflicts
+    coros = [asyncio.to_thread(insert_table, table) for table in tables]
     await asyncio.gather(*coros)
         
 
     end_time = time.time()
     elapsed_time = end_time - start_time
     logger.info(f"Data ingestion completed in {elapsed_time:.2f} seconds.")
-
-    logger.info("Closing connections.")
-    impala_conn.close()
-    redis_cli.close()
     
 if __name__ == "__main__":
     asyncio.run(main())
