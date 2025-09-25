@@ -132,7 +132,11 @@ async def main():
 
     start_time = time.time()
     
-    tables = ["de_bsj_3ref.riesgos_calificacion_prestamos_tarjetas_snap", "de_bsj_3ref.pre_bureau_antecedentes_negativos_om", "de_bsj_3ref.dim_veraz"]
+    tables = ["de_bsj_3ref.riesgos_calificacion_prestamos_tarjetas_snap", 
+              "de_bsj_3ref.pre_bureau_antecedentes_negativos_om", 
+              "de_bsj_3ref.dim_veraz",
+              "de_gpn_3ref.productos_crediticios_gp",
+              "de_gpn_3ref.pre_bureau_fuentes_publicas_om"]
     
 
     await asyncio.gather(*[insert_table(table, redis_cli, impala_conf) for table in tables])
@@ -142,7 +146,7 @@ async def main():
     logger.info(f"Data ingestion completed in {elapsed_time:.2f} seconds.")
 
     logger.info("Closing connections.")
-    await redis_cli.close()
+    await redis_cli.aclose()
     
 if __name__ == "__main__":
     asyncio.run(main())
