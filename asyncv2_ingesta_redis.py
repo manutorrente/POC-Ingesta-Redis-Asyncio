@@ -138,7 +138,7 @@ async def main():
     tables = ["pr_bsf_3ref.riesgos_calificacion_prestamos_tarjetas_snap", "pr_bsf_3ref.pre_bureau_antecedentes_negativos_om", "pr_bsf_3ref.dim_veraz"]
         
     coros = [asyncio.to_thread(insert_table, table, redis_cli, impala_conn) for table in tables]
-    asyncio.gather(*coros)
+    await asyncio.gather(*coros)
         
 
     end_time = time.time()
