@@ -69,7 +69,7 @@ def build_json(data: list, data_columns: list[str], remove_nulls: bool = True) -
 key_column = 1
 
 class TableIterator:
-    def __init__(self, impala_conn, table_name: str, chunk_size: int = 1000) -> None:
+    def __init__(self, impala_conn, table_name: str, chunk_size: int = 2000) -> None:
         self.conn = impala_conn
         self.cursor = impala_conn.cursor()
         query = f"SELECT * FROM {table_name}"
@@ -134,7 +134,7 @@ def main():
               "de_gpn_3ref.productos_crediticios_gp",
               "de_gpn_3ref.pre_bureau_fuentes_publicas_om"] """
     
-    tables = ["de_ber_3ref.riesgos_calificacion_prestamos_tarjetas_snap", "de_bsf_3ref.riesgos_calificacion_prestamos_tarjetas_snap"]
+    tables = ["pr_bsf_3ref.riesgos_calificacion_prestamos_tarjetas_snap", "pr_bsf_3ref.pre_bureau_antecedentes_negativos_om"]
         
     for table in tables:
         print(f"Inserting data from table {table} into Redis...")
