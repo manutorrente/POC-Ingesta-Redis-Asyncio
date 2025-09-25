@@ -138,7 +138,7 @@ async def main():
               "de_gpn_3ref.productos_crediticios_gp",
               "de_gpn_3ref.pre_bureau_fuentes_publicas_om"] """
     
-    tables = ["pr_bsf_3ref.riesgos_calificacion_prestamos_tarjetas_snap", "pr_bsf_3ref.pre_bureau_antecedentes_negativos_om"]
+    tables = ["pr_bsf_3ref.riesgos_calificacion_prestamos_tarjetas_snap", "pr_bsf_3ref.pre_bureau_antecedentes_negativos_om", "pr_bsf_3ref.dim_veraz"]
 
     await asyncio.gather(*[insert_table(table, redis_cli, impala_conf) for table in tables])
 
