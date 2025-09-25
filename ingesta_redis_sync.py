@@ -128,11 +128,13 @@ def main():
 
     start_time = time.time()
     
-    tables = ["de_bsj_3ref.riesgos_calificacion_prestamos_tarjetas_snap", 
+    """     tables = ["de_bsj_3ref.riesgos_calificacion_prestamos_tarjetas_snap", 
               "de_bsj_3ref.pre_bureau_antecedentes_negativos_om", 
               "de_bsj_3ref.dim_veraz",
               "de_gpn_3ref.productos_crediticios_gp",
-              "de_gpn_3ref.pre_bureau_fuentes_publicas_om"]
+              "de_gpn_3ref.pre_bureau_fuentes_publicas_om"] """
+    
+    tables = ["de_ber_3ref.riesgos_calificacion_prestamos_tarjetas_snap", "de_bsf_3ref.riesgos_calificacion_prestamos_tarjetas_snap"]
         
     for table in tables:
         print(f"Inserting data from table {table} into Redis...")
