@@ -91,7 +91,7 @@ class TableIterator:
     def get_column_names(self) -> list[str]:
         self.cursor.execute(f"DESCRIBE {self.table_name}")
         columns = [row[0] for row in self.cursor.fetchall()]
-        logger.info(f"Column names for table {self.table_name}: {columns}")
+        logger.info(f"Fetched column names for table {self.table_name}")
         return columns
         
                 
