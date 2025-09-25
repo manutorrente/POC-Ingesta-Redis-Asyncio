@@ -111,8 +111,9 @@ def insert_table(table_name: str, redis_cli: Redis, impala_conn) -> None:
         
         for row in chunk:
             key = f"tmp:{table_name}:{row[key_column]}"
-            row.pop(key_column)
-            json_data = build_json(row, column_names)
+            row_list = list(row)
+            row_list.pop(key_column)
+            json_data = build_json(row_list, column_names)
             pipeline.set(key, json_data, ex=86400)
 
         logger.info(f"Inserted chunk into Redis for table {table_name}")
