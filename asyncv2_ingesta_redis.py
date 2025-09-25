@@ -1,4 +1,4 @@
-from redis.asyncio import Redis 
+from redis import Redis
 import msgspec
 import os
 from dotenv import load_dotenv
@@ -30,7 +30,7 @@ redis_conf = {
     "password" : os.getenv("REDIS_PASSWORD"),
 }
 
-def init_impala_connection(impala_conf: dict):
+def init_impala_connection():
     try:
         impala_conn = connect(host=impala_conf["host"],
                     port=impala_conf["port"],
@@ -70,47 +70,43 @@ def build_json(data: list, data_columns: list[str], remove_nulls: bool = True) -
 key_column = 1
 
 class TableIterator:
-    def __init__(self, impala_conf: dict, table_name: str, chunk_size: int = 10000) -> None:
-        self.conn = init_impala_connection(impala_conf)
-        self.cursor = self.conn.cursor()
-        self.query = f"SELECT * FROM {table_name}"
-        logger.info(f"Executing query {self.query}")
-        self.startup = False
+    def __init__(self, impala_conn, table_name: str, chunk_size: int = 10000) -> None:
+        self.conn = impala_conn
+        self.cursor = impala_conn.cursor()
+        query = f"SELECT * FROM {table_name}"
+        logger.info(f"Executing query {query}")
+        self.cursor.execute(query)
         self.chunk_size = chunk_size
         self.table_name = table_name
 
-    def __aiter__(self):
+    def __iter__(self):
         return self
 
-    async def __anext__(self):
-        if not self.startup:
-            await asyncio.to_thread(self.cursor.execute, self.query)
-            self.startup = True
+    def __next__(self):
         logger.info(f"Fetching next chunk of data from table {self.table_name}")
-        rows = await asyncio.to_thread(self.cursor.fetchmany, self.chunk_size)
+        rows = self.cursor.fetchmany(self.chunk_size)
         logger.info(f"Fetched {len(rows)} rows from table {self.table_name}")
         if not rows:
             self.cursor.close()
-            self.conn.close()
-            raise StopAsyncIteration
+            raise StopIteration
         return rows
 
-    async def get_column_names(self) -> list[str]:
+    def get_column_names(self) -> list[str]:
         cursor = self.conn.cursor()
-        await asyncio.to_thread(cursor.execute, f"DESCRIBE {self.table_name}")
-        columns = await asyncio.to_thread(lambda: [row[0] for row in cursor.fetchall()])
+        cursor.execute(f"DESCRIBE {self.table_name}")
+        columns = [row[0] for row in cursor.fetchall()]
         logger.info(f"Fetched column names for table {self.table_name}")
         cursor.close()
         return columns
                 
-async def insert_table(table_name: str, redis_cli: Redis, impala_conn) -> None:
+def insert_table(table_name: str, redis_cli: Redis, impala_conn) -> None:
     
     iterator = TableIterator(impala_conn, table_name)
 
-    column_names = await iterator.get_column_names()
+    column_names: list[str] = iterator.get_column_names()
     column_names.pop(key_column)
     
-    async for chunk in iterator:
+    for chunk in iterator:
         
         pipeline = redis_cli.pipeline()
         
@@ -122,13 +118,13 @@ async def insert_table(table_name: str, redis_cli: Redis, impala_conn) -> None:
             pipeline.set(key, json_data, ex=86400)
 
         logger.info(f"Inserted chunk into Redis for table {table_name}")
-        await pipeline.execute()
-        
+        pipeline.execute()
 
 
 async def main():
     logger.info("Hello from redis-poc-async!")
     
+    impala_conn = init_impala_connection()
     redis_cli = init_redis_connection()
 
     start_time = time.time()
@@ -140,15 +136,18 @@ async def main():
               "de_gpn_3ref.pre_bureau_fuentes_publicas_om"] """
     
     tables = ["pr_bsf_3ref.riesgos_calificacion_prestamos_tarjetas_snap", "pr_bsf_3ref.pre_bureau_antecedentes_negativos_om", "pr_bsf_3ref.dim_veraz"]
-
-    await asyncio.gather(*[insert_table(table, redis_cli, impala_conf) for table in tables])
+        
+    coros = [asyncio.to_thread(insert_table, table, redis_cli, impala_conn) for table in tables]
+    asyncio.gather(*coros)
+        
 
     end_time = time.time()
     elapsed_time = end_time - start_time
     logger.info(f"Data ingestion completed in {elapsed_time:.2f} seconds.")
 
     logger.info("Closing connections.")
-    await redis_cli.aclose()
+    impala_conn.close()
+    redis_cli.close()
     
 if __name__ == "__main__":
     asyncio.run(main())
